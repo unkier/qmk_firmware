@@ -1,0 +1,7 @@
+#monitor jtag_scan
+monitor swdp_scan
+#monitor tpwr enable
+attach 1
+load
+compare-sections
+kill
