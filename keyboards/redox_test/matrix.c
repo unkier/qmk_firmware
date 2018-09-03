@@ -35,8 +35,6 @@ static uint8_t debouncing = DEBOUNCE;
 /* matrix state(1:on, 0:off) */
 static matrix_row_t matrix[MATRIX_ROWS];
 static matrix_row_t matrix_debouncing[MATRIX_ROWS];
-static uint8_t scan_start , scan_end = 0;
-static uint8_t is_master = 0;
 
 #define addr 0x07
 
@@ -49,18 +47,13 @@ static const I2CConfig i2cfg1 = {
     FAST_DUTY_CYCLE_2,
 };
 
-
-
-
-//static matrix_row_t read_cols(void);
 static void init_cols(void);
 static void init_rows(void);
 
 static void unselect_row(uint8_t row);
 static void select_row(uint8_t row);
 
-
-static matrix_row_t read_cols(void);
+static matrix_row_t read_row(void);
 
 inline
 uint8_t matrix_rows(void)
@@ -116,16 +109,6 @@ void matrix_init(void)
     palSetPadMode(GPIOB, 6, PAL_MODE_STM32_ALTERNATE_OPENDRAIN);   /* SCL */
     palSetPadMode(GPIOB, 7, PAL_MODE_STM32_ALTERNATE_OPENDRAIN);   /* SDA */
 
-    //if (palReadPort(GPIOB) & 0x01) {
-    scan_start = 7;
-    scan_end = MATRIX_COLS;
-    is_master = 1;
-
-    /*} else {
-        scan_start = 0;
-        scan_end = 7;
-    }*/
-
     i2c_init_master();
 
     // initialize matrix state: all keys off
@@ -133,72 +116,35 @@ void matrix_init(void)
         matrix[i] = 0;
         matrix_debouncing[i] = 0;
     }
-
-    //debug
-
-    /*debug_matrix = true;
-    LED_ON();
-    wait_ms(500);
-    LED_OFF();*/
-
-
-
 }
 
 uint8_t matrix_scan(void)
 {
-    bool matrix_changed = false;
-
-
-
-    for (uint8_t i = scan_start; i < scan_end; i++) {
+    for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
 
         select_row(i);
         wait_us(30);  // without this wait read unstable value.
 
-        matrix_row_t cols = read_cols();
-
-
-        matrix_changed = false;
-        for (uint8_t j = 0; j < MATRIX_ROWS; ++j) {
-            matrix_row_t last_row_value = matrix_debouncing[j];
-
-            if ((cols >> j) & 0x01) {
-                matrix_debouncing[j] |= (1 << i);
-            } else {
-                matrix_debouncing[j] &= ~(1 << i);
-            }
-
-            if (matrix_debouncing[j] != last_row_value) {
-                matrix_changed = true;
-            }
-
-        }
-
-        unselect_row(i);
-
-
-        if (matrix_changed) {
+        matrix_row_t rows = read_row();
+        if (matrix_debouncing[i] != rows) {
+            matrix_debouncing[i] = rows;
             debouncing = DEBOUNCE;
         }
-
-
+        unselect_row(i);
     }
 
     if (debouncing) {
-        if (--debouncing) {
-            wait_ms(1);
-        } else {
-            for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
-                matrix[i] = matrix_debouncing[i];
-            }
+        debouncing--;
+    } else {
+        for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
+            matrix[i] = matrix_debouncing[i];
         }
     }
 
     i2c_scan();
 
     for (uint8_t i = 0; i < MATRIX_ROWS; i++) {
-        matrix[i] = (matrix[i] & 0xff00) | rx_data[i];
+        matrix[i] = (matrix[i] & 0x3f80) | rx_data[i];
         rx_data[i] = 0;
     }
 
@@ -229,75 +175,54 @@ void matrix_print(void)
 
 /* Column pin configuration
  */
-static void  init_rows(void)
+static void  init_cols(void)
 {
-    palSetPadMode(GPIOA, 0,  PAL_MODE_OUTPUT_PUSHPULL);
-    palSetPadMode(GPIOA, 1,  PAL_MODE_OUTPUT_PUSHPULL);
-    palSetPadMode(GPIOA, 2,  PAL_MODE_OUTPUT_PUSHPULL);
-    palSetPadMode(GPIOA, 3,  PAL_MODE_OUTPUT_PUSHPULL);
-    palSetPadMode(GPIOA, 4,  PAL_MODE_OUTPUT_PUSHPULL);
-    palSetPadMode(GPIOA, 5,  PAL_MODE_OUTPUT_PUSHPULL);
-    palSetPadMode(GPIOA, 6,  PAL_MODE_OUTPUT_PUSHPULL);
+    palSetPadMode(GPIOA, 0,  PAL_MODE_INPUT_PULLUP);
+    palSetPadMode(GPIOA, 1,  PAL_MODE_INPUT_PULLUP);
+    palSetPadMode(GPIOA, 2,  PAL_MODE_INPUT_PULLUP);
+    palSetPadMode(GPIOA, 3,  PAL_MODE_INPUT_PULLUP);
+    palSetPadMode(GPIOA, 4,  PAL_MODE_INPUT_PULLUP);
+    palSetPadMode(GPIOA, 5,  PAL_MODE_INPUT_PULLUP);
+    palSetPadMode(GPIOA, 6,  PAL_MODE_INPUT_PULLUP);
 }
 
-
-static void init_cols(void)
+static void init_rows(void)
 {
     /*mark*/
     palSetPadMode(GPIOB, 0, PAL_MODE_INPUT_PULLUP);
 
-    palSetPadMode(GPIOB, 8, PAL_MODE_INPUT_PULLDOWN);
-    palSetPadMode(GPIOB, 9, PAL_MODE_INPUT_PULLDOWN);
-    palSetPadMode(GPIOB, 10, PAL_MODE_INPUT_PULLDOWN);
-    palSetPadMode(GPIOB, 11, PAL_MODE_INPUT_PULLDOWN);
-    palSetPadMode(GPIOB, 12, PAL_MODE_INPUT_PULLDOWN);
+    palSetPadMode(GPIOB, 8, PAL_MODE_OUTPUT_PUSHPULL);
+    palSetPadMode(GPIOB, 9, PAL_MODE_OUTPUT_PUSHPULL);
+    palSetPadMode(GPIOB, 10, PAL_MODE_OUTPUT_PUSHPULL);
+    palSetPadMode(GPIOB, 11, PAL_MODE_OUTPUT_PUSHPULL);
+    palSetPadMode(GPIOB, 12, PAL_MODE_OUTPUT_PUSHPULL);
 
 }
 
 /* Returns status of switches(1:on, 0:off) */
-static matrix_row_t read_cols(void)
+static matrix_row_t read_row(void)
 {
-    return (palReadPort(GPIOB) >> 8) & 0x1f;
+    return (((~palReadPort(GPIOA)) & 0x7f) << 7);
 }
 
-
-static void select_row(uint8_t col) {
-    switch (col) {
-        case 0: palSetPad(GPIOA, 0);    break;
-        case 1: palSetPad(GPIOA, 1);    break;
-        case 2: palSetPad(GPIOA, 2);    break;
-        case 3: palSetPad(GPIOA, 3);    break;
-        case 4: palSetPad(GPIOA, 4);    break;
-        case 5: palSetPad(GPIOA, 5);    break;
-        case 6: palSetPad(GPIOA, 6);    break;
-
-        case 7: palSetPad(GPIOA, 0);    break;
-        case 8: palSetPad(GPIOA, 1);    break;
-        case 9: palSetPad(GPIOA, 2);    break;
-        case 10: palSetPad(GPIOA, 3);    break;
-        case 11: palSetPad(GPIOA, 4);    break;
-        case 12: palSetPad(GPIOA, 5);    break;
-        case 13: palSetPad(GPIOA, 6);    break;
+static void select_row(uint8_t row) {
+    switch (row) {
+        case 0: palClearPad(GPIOB, 8);    break;
+        case 1: palClearPad(GPIOB, 9);    break;
+        case 2: palClearPad(GPIOB, 10);    break;
+        case 3: palClearPad(GPIOB, 11);    break;
+        case 4: palClearPad(GPIOB, 12);    break;
         default:break;
     }
 }
 
-static void unselect_row(uint8_t col) {
-    switch (col) {
-        case 0: palClearPad(GPIOA, 0);    break;
-        case 1: palClearPad(GPIOA, 1);    break;
-        case 2: palClearPad(GPIOA, 2);    break;
-        case 3: palClearPad(GPIOA, 3);    break;
-        case 4: palClearPad(GPIOA, 4);    break;
-        case 5: palClearPad(GPIOA, 5);    break;
-        case 6: palClearPad(GPIOA, 6);    break;
-
-        case 7: palClearPad(GPIOA, 0);    break;
-        case 8: palClearPad(GPIOA, 1);    break;
-        case 9: palClearPad(GPIOA, 2);    break;
-        case 10: palClearPad(GPIOA, 3);    break;
-        case 11: palClearPad(GPIOA, 4);    break;
-        case 12: palClearPad(GPIOA, 5);    break;
-        case 13: palClearPad(GPIOA, 6);    break;
+static void unselect_row(uint8_t row) {
+    switch (row) {
+        case 0: palSetPad(GPIOB, 8);    break;
+        case 1: palSetPad(GPIOB, 9);    break;
+        case 2: palSetPad(GPIOB, 10);    break;
+        case 3: palSetPad(GPIOB, 11);    break;
+        case 4: palSetPad(GPIOB, 12);    break;
+        default:break;
     }
 }

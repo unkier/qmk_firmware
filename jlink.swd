@@ -1,0 +1,5 @@
+si SWD
+speed 4000
+Device STM32F103C8
+loadfile .build/redox_test_default.hex
+q
